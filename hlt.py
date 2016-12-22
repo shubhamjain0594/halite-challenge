@@ -91,6 +91,7 @@ class GameMap:
                 else:
                     l.x -= 1
         return l
-    def getSite(self, l, direction = STILL):
+
+    def getSite(self, l, direction=STILL):
         l = self.getLocation(l, direction)
         return self.contents[l.y][l.x]
