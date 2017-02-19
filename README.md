@@ -38,3 +38,7 @@ The replays were downloaded using scrapeData.py script.
 ## Issues
 
 1. The bot timed out on large board sizes at times because of unavailability of GPUs and convolutions being calculated on CPU.
+
+## Results
+
+The model finished 94th on the final list.
