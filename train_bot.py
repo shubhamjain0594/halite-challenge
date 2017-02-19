@@ -6,35 +6,74 @@ import json
 from keras.models import Sequential
 from keras.models import load_model
 from keras.layers import Dense
-from keras.layers.advanced_activations import LeakyReLU
+from keras.layers.core import Flatten
+from keras.layers import convolutional as conv
+from keras.layers import pooling as pool
+from keras.layers import normalization as norm
+from keras.layers.advanced_activations import LeakyReLU, PReLU
 from keras.callbacks import EarlyStopping
 from keras.callbacks import ModelCheckpoint
 from keras.callbacks import TensorBoard
 from keras.optimizers import Nadam
+import tensorflow as tf
+import keras.backend.tensorflow_backend as KTF
+import gc
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+
+def get_session(gpu_fraction=0.20):
+    '''
+    Set 15% of GPU space for the program
+    '''
+    num_threads = os.environ.get('OMP_NUM_THREADS')
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_fraction)
+
+    if num_threads:
+        return tf.Session(config=tf.ConfigProto(
+            gpu_options=gpu_options, intra_op_parallelism_threads=num_threads))
+    else:
+        return tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+
+KTF.set_session(get_session())
 
 REPLAY_FOLDER = sys.argv[1]
 training_input = []
 training_target = []
 
-VISIBLE_DISTANCE = 5
-input_dim = 4*(2*VISIBLE_DISTANCE+1)*(2*VISIBLE_DISTANCE+1)
+VISIBLE_DISTANCE = 7
+width_img = 2 * VISIBLE_DISTANCE + 1
+input_dim = 32 * VISIBLE_DISTANCE * VISIBLE_DISTANCE
 np.random.seed(0)  # for reproducibility
 
-model = Sequential([Dense(512, input_dim=input_dim),
-                    LeakyReLU(),
-                    Dense(512),
-                    LeakyReLU(),
-                    Dense(512),
-                    LeakyReLU(),
-                    Dense(5, activation='softmax')])
-optim = Nadam(lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, schedule_decay=0.004)
+feature_extractor = Sequential()
+feature_extractor.add(conv.Convolution2D(32, 3, 3, border_mode='same', input_shape=(width_img, width_img, 4), init='glorot_normal'))
+feature_extractor.add(PReLU(init='zero', weights=None))
+feature_extractor.add(pool.MaxPooling2D(pool_size=(2, 2), border_mode='valid'))
+feature_extractor.add(conv.Convolution2D(64, 3, 3, border_mode='same', init='glorot_normal'))
+feature_extractor.add(PReLU(init='zero', weights=None))
+feature_extractor.add(pool.MaxPooling2D(pool_size=(2, 2), border_mode='valid'))
+feature_extractor.add(Flatten())
+
+classifier = Sequential()
+classifier.add(Dense(256, input_dim=feature_extractor.output_shape[1], init='glorot_normal'))
+classifier.add(PReLU(init='zero', weights=None))
+classifier.add(Dense(128, init='glorot_normal'))
+classifier.add(PReLU(init='zero', weights=None))
+classifier.add(Dense(5, init='glorot_normal'))
+
+model = Sequential()
+model.add(feature_extractor)
+model.add(classifier)
+optim = Nadam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, schedule_decay=0.004)
 model.compile(optim, 'categorical_crossentropy', metrics=['accuracy'])
 
 
 def stack_to_input(stack, position):
-    return np.take(np.take(stack,
-                np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1)+position[0], axis=1, mode='wrap'),
-                    np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1)+position[1], axis=2, mode='wrap').flatten()
+    return np.transpose(
+                np.take(np.take(stack,
+                        np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1)+position[0], axis=1, mode='wrap'),
+                        np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1)+position[1], axis=2, mode='wrap'), (2, 1, 0))
 
 
 size = len(os.listdir(REPLAY_FOLDER))
@@ -66,6 +105,7 @@ for index, replay_name in enumerate(os.listdir(REPLAY_FOLDER)):
                                                                     min(len(sampling_rate), 2048), p=sampling_rate, replace=False)]
 
     replay_input = np.array([stack_to_input(stacks[i], [j, k]) for i, j, k in sample_indices])
+    print(replay_input.shape)
     replay_target = moves[tuple(sample_indices.T)]
 
     training_input.append(replay_input.astype(np.float32))
@@ -82,7 +122,7 @@ training_target = training_target[indices]
 
 
 model.fit(training_input, training_target, validation_split=0.2,
-          callbacks=[EarlyStopping(patience=20),
+          callbacks=[EarlyStopping(patience=50),
                      ModelCheckpoint('model.h5', verbose=1, save_best_only=True),
                      tensorboard],
           batch_size=4096, nb_epoch=1000)
@@ -92,3 +132,4 @@ model = load_model('model.h5')
 still_mask = training_target[:, 0].astype(bool)
 print('STILL accuracy:', model.evaluate(training_input[still_mask], training_target[still_mask], verbose=0)[1])
 print('MOVE accuracy:', model.evaluate(training_input[~still_mask], training_target[~still_mask], verbose=0)[1])
+gc.collect()
