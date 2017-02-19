@@ -60,7 +60,7 @@ classifier.add(Dense(256, input_dim=feature_extractor.output_shape[1], init='glo
 classifier.add(PReLU(init='zero', weights=None))
 classifier.add(Dense(128, init='glorot_normal'))
 classifier.add(PReLU(init='zero', weights=None))
-classifier.add(Dense(5, init='glorot_normal'))
+classifier.add(Dense(5, init='glorot_normal', activation='softmax'))
 
 model = Sequential()
 model.add(feature_extractor)
@@ -72,8 +72,8 @@ model.compile(optim, 'categorical_crossentropy', metrics=['accuracy'])
 def stack_to_input(stack, position):
     return np.transpose(
                 np.take(np.take(stack,
-                        np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1)+position[0], axis=1, mode='wrap'),
-                        np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1)+position[1], axis=2, mode='wrap'), (2, 1, 0))
+                        np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1) + position[0], axis=1, mode='wrap'),
+                        np.arange(-VISIBLE_DISTANCE, VISIBLE_DISTANCE + 1) + position[1], axis=2, mode='wrap'), (2, 1, 0))
 
 
 size = len(os.listdir(REPLAY_FOLDER))
@@ -94,11 +94,11 @@ for index, replay_name in enumerate(os.listdir(REPLAY_FOLDER)):
     strength = frames[:, :, :, 1]
 
     moves = (np.arange(5) == np.array(replay['moves'])[:, :, :, None]).astype(int)[:128]
-    stacks = np.array([player == target_id, (player != target_id) & (player != 0), prod/20, strength/255])
+    stacks = np.array([player == target_id, (player != target_id) & (player != 0), prod / 20, strength / 255])
     stacks = stacks.transpose(1, 0, 2, 3)[:len(moves)].astype(np.float32)
 
     position_indices = stacks[:, 0].nonzero()
-    sampling_rate = 1/stacks[:, 0].mean(axis=(1, 2))[position_indices[0]]
+    sampling_rate = 1 / stacks[:, 0].mean(axis=(1, 2))[position_indices[0]]
     sampling_rate *= moves[position_indices].dot(np.array([1, 10, 10, 10, 10]))  # weight moves 10 times higher than still
     sampling_rate /= sampling_rate.sum()
     sample_indices = np.transpose(position_indices)[np.random.choice(np.arange(len(sampling_rate)),
@@ -112,7 +112,7 @@ for index, replay_name in enumerate(os.listdir(REPLAY_FOLDER)):
     training_target.append(replay_target.astype(np.float32))
 
 now = datetime.datetime.now()
-tensorboard = TensorBoard(log_dir='./logs/'+now.strftime('%Y.%m.%d %H.%M'))
+tensorboard = TensorBoard(log_dir='./logs/' + now.strftime('%Y.%m.%d %H.%M'))
 training_input = np.concatenate(training_input, axis=0)
 training_target = np.concatenate(training_target, axis=0)
 indices = np.arange(len(training_input))
